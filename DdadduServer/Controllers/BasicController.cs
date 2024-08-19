@@ -12,65 +12,63 @@ namespace DdadduServer.Controllers
 
         public BasicController(IWebHostEnvironment environment)
         {
-            Console.WriteLine("생성");
             _environment = environment;
             _httpClient = new HttpClient();
         }
 
-
-        [HttpGet("hello")]
-        public IActionResult Hello()
-        {
-            Console.WriteLine("Ok");
-            return Ok("hello");
-        }
-
         [HttpPost("upload")]
-        public async Task<IActionResult> Upload([FromForm] string fileUrl)
+        public async Task<IActionResult> Upload([FromForm] List<string> fileUrls)
         {
-            if (string.IsNullOrEmpty(fileUrl))
+            if (fileUrls == null || fileUrls.Count == 0)
             {
-                return BadRequest("File URL is missing.");
+                return BadRequest("File URLs are missing.");
             }
-            
+
+            var fileUrlsOnServer = new List<string>();
             var fileExtension = ".jpg";
-            var fileName = Guid.NewGuid().ToString() + fileExtension;
             var uploadsDir = Path.Combine(_environment.WebRootPath, "main-images");
+
             if (!Directory.Exists(uploadsDir))
             {
                 Directory.CreateDirectory(uploadsDir);
             }
 
-            var filePath = Path.Combine(uploadsDir, fileName);
-
-            try
+            foreach (var fileUrl in fileUrls)
             {
-                using (var response = await _httpClient.GetAsync(fileUrl))
-                {
-                    if (!response.IsSuccessStatusCode)
-                    {
-                        return BadRequest("Failed to download the file.");
-                    }
+                var fileName = Guid.NewGuid().ToString() + fileExtension;
+                var filePath = Path.Combine(uploadsDir, fileName);
 
-                    using (var inputStream = await response.Content.ReadAsStreamAsync())
+                try
+                {
+                    using (var response = await _httpClient.GetAsync(fileUrl))
                     {
-                        using (var image = await Image.LoadAsync(inputStream))
+                        if (!response.IsSuccessStatusCode)
                         {
-                            using (var outputStream = new FileStream(filePath, FileMode.Create))
+                            return BadRequest($"Failed to download the file from {fileUrl}.");
+                        }
+
+                        using (var inputStream = await response.Content.ReadAsStreamAsync())
+                        {
+                            using (var image = await Image.LoadAsync(inputStream))
                             {
-                                await image.SaveAsync(outputStream, new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder());
+                                using (var outputStream = new FileStream(filePath, FileMode.Create))
+                                {
+                                    await image.SaveAsync(outputStream, new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder());
+                                }
                             }
                         }
                     }
-                }
 
-                var fileUrlOnServer = $"{Request.Scheme}://{Request.Host}/uploads/{fileName}";
-                return Ok(new { url = fileUrlOnServer });
+                    var fileUrlOnServer = $"{Request.Scheme}://{Request.Host}/main-images/{fileName}";
+                    fileUrlsOnServer.Add(fileUrlOnServer);
+                }
+                catch (Exception ex)
+                {
+                    return StatusCode(500, $"Internal server error: {ex.Message}");
+                }
             }
-            catch (Exception ex)
-            {
-                return StatusCode(500, $"Internal server error: {ex.Message}");
-            }
+
+            return Ok(new { urls = fileUrlsOnServer });
         }
     }
 }
