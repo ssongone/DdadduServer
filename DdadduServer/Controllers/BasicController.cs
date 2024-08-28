@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using LiteDB;
+using Microsoft.AspNetCore.Mvc;
 using SixLabors.ImageSharp;
 
 namespace DdadduServer.Controllers
@@ -10,14 +11,19 @@ namespace DdadduServer.Controllers
         private readonly IWebHostEnvironment _environment;
         private readonly HttpClient _httpClient;
 
-        public BasicController(IWebHostEnvironment environment)
+        private readonly LiteDatabase _liteDatabase;
+        private readonly ILiteCollection<Publication> _publications;
+
+        public BasicController(IWebHostEnvironment environment, LiteDatabase liteDatabase)
         {
             _environment = environment;
             _httpClient = new HttpClient();
+            _liteDatabase = liteDatabase;
+            _publications = _liteDatabase.GetCollection<Publication>("publications");
         }
 
         [HttpPost("upload")]
-        public async Task<IActionResult> Upload([FromForm] List<string> fileUrls)
+        public async Task<IActionResult> Upload([FromBody] List<string> fileUrls)
         {
             if (fileUrls == null || fileUrls.Count == 0)
             {
@@ -68,7 +74,57 @@ namespace DdadduServer.Controllers
                 }
             }
 
-            return Ok(new { urls = fileUrlsOnServer });
+            return Ok(fileUrlsOnServer);
         }
+
+        public static readonly List<string> ExclusionList = new List<string>{
+            "プレイボーイ",
+            "漫画アクション",
+            "プロレス",
+            "ＦＲＩＤＡＹ",
+            "ヤングマガジン",
+            "ヤングチャンピオン"
+        };
+
+        [HttpPost("validate")]
+        public async Task<IActionResult> Validate([FromBody] List<string> titleList)
+        {
+            var statusList = new List<string>();
+
+            foreach (var title in titleList)
+            {
+                if (ExclusionList.Any(ex => title.Contains(ex))) {
+                    statusList.Add("필터링");
+                    continue;
+                }
+                var exists = _publications.FindOne(p => p.Title == title) != null;
+
+                if (exists) 
+                {
+                    statusList.Add("중복");
+                    continue;
+                }
+
+                var newPublication = new Publication{ Title = title };
+                _publications.Insert(newPublication);
+                statusList.Add("");
+            }
+
+            return Ok(statusList);
+
+        }
+
+        [HttpGet("db/initialize")]
+        public async Task<IActionResult> DbInitialize()
+        {
+            _publications.DeleteAll();
+            return Ok();
+        }
+
+    }
+
+    public class Publication
+    {
+        public string Title { get; set; }
     }
 }
